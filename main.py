@@ -5,88 +5,61 @@ from dotenv import load_dotenv
 from discord.ext import commands
 from discord.utils import get
 from discord import FFmpegPCMAudio
-from discord import TextChannel
-from youtube_dl import YoutubeDL
 
-load_dotenv()
-client = commands.Bot(command_prefix='.')  # prefix our commands with '.'
+Create a backup
+        __Examples__
+        ```{c.prefix}backup create```
+        """
+        backup_count = await ctx.db.backups.count_documents({"creator": ctx.author.id})
+        if backup_count >= max_backups:
+            raise cmd.CommandError("You have **exceeded the maximum count** of backups.\n\n"
+                                   f"Upgrade to Pro (`x!pro`) to be able to create more than **{max_backups}**. "
+                                   f"backups **or delete one of your old backups** (`x!backup list` "
+                                   f"& `x!backup delete <id>`).")
 
-players = {}
+        status = await ctx.send(**ctx.em("**Creating backup** ... Please wait", type="working"))
+        handler = BackupSaver(self.bot, self.bot.session, ctx.guild)
+        backup = await handler.save()
+        id = await self._save_backup(ctx.author.id, backup)
 
+        embed = ctx.em(f"Successfully **created backup** with the id `{id}`.\n", type="success")["embed"]
+        embed.add_field(name="Usage",
+                        value=f"```{ctx.prefix}backup load {id}```\n```{ctx.prefix}backup info {id}```")
+        await status.edit(embed=embed)
+        try:
+            if ctx.author.is_on_mobile():
+                await ctx.author.send(f"{ctx.prefix}backup load {id}")
 
-@client.event  # check if bot is ready
-async def on_ready():
-    print('Bot online')
+            else:
+                embed = ctx.em(
+                    f"Created backup of **{ctx.guild.name}** with the backup id `{id}`\n", type="info")["embed"]
+                embed.add_field(name="Usage",
+                                value=f"```{ctx.prefix}backup load {id}```\n```{ctx.prefix}backup info {id}```")
+                await ctx.author.send(embed=embed)
 
+        except Exception:
+            pass
 
-# command for bot to join the channel of the user, if the bot has already joined and is in a different channel, it will move to the channel the user is in
-@client.command()
-async def join(ctx):
-    channel = ctx.message.author.voice.channel
-    voice = get(client.voice_clients, guild=ctx.guild)
-    if voice and voice.is_connected():
-        await voice.move_to(channel)
-    else:
-        voice = await channel.connect()
-
-
-# command to play sound from a youtube URL
-@client.command()
-async def play(ctx, url):
-    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'True'}
-    FFMPEG_OPTIONS = {
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-    voice = get(client.voice_clients, guild=ctx.guild)
-
-    if not voice.is_playing():
-        with YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=False)
-        URL = info['url']
-        voice.play(FFmpegPCMAudio(URL, **FFMPEG_OPTIONS))
-        voice.is_playing()
-        await ctx.send('Bot is playing')
-
-# check if the bot is already playing
-    else:
-        await ctx.send("Bot is already playing")
-        return
-
-
-# command to resume voice if it is paused
-@client.command()
-async def resume(ctx):
-    voice = get(client.voice_clients, guild=ctx.guild)
-
-    if not voice.is_playing():
-        voice.resume()
-        await ctx.send('Bot is resuming')
-
-
-# command to pause voice if it is playing
-@client.command()
-async def pause(ctx):
-    voice = get(client.voice_clients, guild=ctx.guild)
-
-    if voice.is_playing():
-        voice.pause()
-        await ctx.send('Bot has been paused')
-
-
-# command to stop voice
-@client.command()
-async def stop(ctx):
-    voice = get(client.voice_clients, guild=ctx.guild)
-
-    if voice.is_playing():
-        voice.stop()
-        await ctx.send('Stopping...')
-
-
-# command to clear channel messages
-@client.command()
-async def clear(ctx, amount=5):
-    await ctx.channel.purge(limit=amount)
-    await ctx.send("Messages have been cleared")
-
+    @backup.command(aliases=["l"])
+    @cmd.guild_only()
+    @cmd.has_permissions(administrator=True)
+    @cmd.bot_has_permissions(administrator=True)
+    @checks.bot_has_managed_top_role()
+    @cmd.cooldown(1, 5 * 60, cmd.BucketType.guild)
+    async def load(self, ctx, backup_id, *options):
+        """
+        Load a backup
+        __Arguments__
+        **backup_id**: The id of the backup or the guild id of the latest automated backup
+        **options**: A list of options (See examples)
+        __Examples__
+        Default options: ```{c.prefix}backup load oj1xky11871fzrbu```
+        Only roles: ```{c.prefix}backup load oj1xky11871fzrbu !* roles```
+        Everything but bans: ```{c.prefix}backup load oj1xky11871fzrbu !bans```
+        """
+        backup_id = str(ctx.guild.id) if backup_id.lower() == "interval" else backup_id
+        backup = await self._get_backup(backup_id)
+        if backup is None or backup.get("creator") != ctx.author.id:
+            raise cmd.CommandError(f"You have **no backup** with the id `{backup_id}`.")
 
 client.run(os.getenv('ODg0NjY1NDk1MTg0MzQzMDgw.YTby8g.nF94UTk_TA8hfQu290DCpipxS-E'))
